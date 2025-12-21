@@ -91,9 +91,13 @@ public class ClientHandler implements Runnable {
                                 User user = userDAO.checkLogin(email, pass);
                                 
                                 if (user != null) {
-                                    // Trả về thông tin user để Client hiển thị
-                                    // Format: LOGIN_SUCCESS;FullName;Gender;Dob
-                                    response = "LOGIN_SUCCESS;" + user.getName() + ";" + user.getGender() + ";" + user.getDob();
+                                    String dob = user.getDob() != null ? user.getDob().toString() : "";
+                                   response = "LOGIN_SUCCESS;"
+                                                + user.getEmail() + ";"
+                                                 + user.getName() + ";"
+                                                 + user.getGender() + ";"
+                                                + user.getDob().toString();
+
                                 } else {
                                     response = "LOGIN_FAIL";
                                 }

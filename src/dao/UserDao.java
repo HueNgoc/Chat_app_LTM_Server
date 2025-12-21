@@ -120,37 +120,52 @@ public class UserDao {
 
     // 3. ĐĂNG NHẬP
     public User checkLogin(String email, String password) {
-        // Join 2 bảng để lấy đủ thông tin
-        String sql = "SELECT u.id, u.full_name, u.gender, u.dob, uc.password_hash, uc.is_verified, uc.is_locked " +
-                     "FROM user_credentials uc JOIN users u ON uc.user_id = u.id WHERE uc.username = ?";
-        
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1, email);
-            ResultSet rs = stmt.executeQuery();
 
-            if (rs.next()) {
-                boolean isVerified = rs.getBoolean("is_verified");
-                boolean isLocked = rs.getBoolean("is_locked");
-                String dbHash = rs.getString("password_hash");
+    String sql = """
+        SELECT 
+            u.id,
+            u.full_name,
+            u.gender,
+            u.dob,
+            uc.username,
+            uc.password_hash,
+            uc.is_verified,
+            uc.is_locked
+        FROM user_credentials uc
+        JOIN users u ON uc.user_id = u.id
+        WHERE uc.username = ?
+    """;
 
-                if (isLocked) return null; // Tài khoản bị khóa
-                if (!isVerified) return null; // Chưa nhập OTP
+    try (Connection conn = DatabaseConnection.getConnection();
+         PreparedStatement stmt = conn.prepareStatement(sql)) {
 
-                // Check password (PasswordUtils.hash(password).equals(dbHash))
-                if (PasswordUtils.check(password, dbHash)) { // Tạm thời so sánh thường để test
-                    return new User(
-                        rs.getInt("id"),
-                        rs.getString("full_name"),
-                        email,
-                        rs.getString("gender"),
-                        rs.getDate("dob")
-                    );
-                }
+        stmt.setString(1, email);
+        ResultSet rs = stmt.executeQuery();
+
+        if (rs.next()) {
+
+            if (rs.getBoolean("is_locked")) return null;
+            if (!rs.getBoolean("is_verified")) return null;
+
+            if (!PasswordUtils.check(password, rs.getString("password_hash"))) {
+                return null;
             }
-        } catch (Exception e) { e.printStackTrace(); }
-        return null;
+
+            return new User(
+                rs.getInt("id"),
+                rs.getString("full_name"),
+                rs.getString("username"), // LẤY TỪ DB
+                rs.getString("gender"),
+                rs.getDate("dob")
+            );
+        }
+
+    } catch (Exception e) {
+        e.printStackTrace();
     }
+    return null;
+}
+
     
     // 4. CẬP NHẬT THÔNG TIN
     public boolean updateUserInfo(User user) {
@@ -171,4 +186,28 @@ public class UserDao {
             return false;
         }
     }
+    
+  public static String getFullNameByEmail(String email) {
+    String sql = """
+        SELECT u.full_name
+        FROM user_credentials uc
+        JOIN users u ON uc.user_id = u.id
+        WHERE uc.username = ?
+    """;
+
+    try (Connection conn = DatabaseConnection.getConnection();
+         PreparedStatement ps = conn.prepareStatement(sql)) {
+
+        ps.setString(1, email);
+        ResultSet rs = ps.executeQuery();
+
+        if (rs.next()) {
+            return rs.getString("full_name");
+        }
+    } catch (Exception e) {
+        e.printStackTrace();
+    }
+    return email; // fallback
+}
+
 }
