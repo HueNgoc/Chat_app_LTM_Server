@@ -4,27 +4,33 @@
  */
 package controller;
 
-
-
+import dao.GroupDao;
+import dao.MessageDao;
 import dao.UserDao;
 import model.User;
 import java.io.*;
 import java.net.Socket;
 import java.sql.Date; // Thư viện để xử lý ngày tháng (yyyy-MM-dd)
+import java.util.List;
 
 /**
- * Class này chịu trách nhiệm xử lý từng kết nối của Client gửi lên.
- * Mỗi Client kết nối sẽ chạy trên 1 luồng (Thread) riêng biệt.
+ * Class này chịu trách nhiệm xử lý từng kết nối của Client gửi lên. Mỗi Client
+ * kết nối sẽ chạy trên 1 luồng (Thread) riêng biệt.
  */
 public class ClientHandler implements Runnable {
+
     private Socket socket;
     private UserDao userDAO;
+    private GroupDao groupDAO;
     private BufferedReader in;
     private PrintWriter out;
+    private MessageDao messageDAO;
 
     public ClientHandler(Socket socket) {
         this.socket = socket;
         this.userDAO = new UserDao(); // Khởi tạo DAO để làm việc với Database
+        this.groupDAO = new GroupDao();
+        this.messageDAO = new MessageDao();
     }
 
     @Override
@@ -38,7 +44,7 @@ public class ClientHandler implements Runnable {
             // Vòng lặp liên tục lắng nghe yêu cầu từ Client
             while ((request = in.readLine()) != null) {
                 System.out.println("Client Request: " + request); // Ghi log ra màn hình server
-                
+
                 // Cắt chuỗi theo dấu chấm phẩy ";"
                 // Ví dụ: "LOGIN;admin@gmail.com;123456" -> ["LOGIN", "admin@gmail.com", "123456"]
                 String[] parts = request.split(";");
@@ -60,7 +66,7 @@ public class ClientHandler implements Runnable {
                                 newUser.setName(parts[3]);
                                 newUser.setGender(parts[4]);
                                 // Chuyển String "yyyy-MM-dd" sang java.sql.Date
-                                newUser.setDob(Date.valueOf(parts[5])); 
+                                newUser.setDob(Date.valueOf(parts[5]));
 
                                 boolean isRegistered = userDAO.registerUser(newUser);
                                 response = isRegistered ? "REGISTER_SUCCESS" : "REGISTER_FAIL;Email Exists";
@@ -89,14 +95,14 @@ public class ClientHandler implements Runnable {
                                 String email = parts[1];
                                 String pass = parts[2];
                                 User user = userDAO.checkLogin(email, pass);
-                                
+
                                 if (user != null) {
                                     String dob = user.getDob() != null ? user.getDob().toString() : "";
-                                   response = "LOGIN_SUCCESS;"
-                                                + user.getEmail() + ";"
-                                                 + user.getName() + ";"
-                                                 + user.getGender() + ";"
-                                                + user.getDob().toString();
+                                    response = "LOGIN_SUCCESS;"
+                                            + user.getEmail() + ";"
+                                            + user.getName() + ";"
+                                            + user.getGender() + ";"
+                                            + user.getDob().toString();
 
                                 } else {
                                     response = "LOGIN_FAIL";
@@ -115,11 +121,74 @@ public class ClientHandler implements Runnable {
                                 upUser.setName(parts[2]);
                                 upUser.setGender(parts[3]);
                                 upUser.setDob(Date.valueOf(parts[4]));
-                                
+
                                 boolean isUpdated = userDAO.updateUserInfo(upUser);
                                 response = isUpdated ? "UPDATE_SUCCESS" : "UPDATE_FAIL";
                             }
                             break;
+
+                        case "CREATE_GROUP": {
+                            String email = parts[1];
+                            String groupName = parts[2];
+
+                            int userId = userDAO.getUserIdByEmail(email);
+                            int groupId = groupDAO.createGroup(groupName, userId);
+
+                            response = (groupId != -1)
+                                    ? "CREATE_GROUP_SUCCESS;" + groupId + ";" + groupName
+                                    : "CREATE_GROUP_FAIL";
+                            break;
+                        }
+
+                        case "JOIN_GROUP": {
+                            int userId = userDAO.getUserIdByEmail(parts[1]);
+                            int groupId = Integer.parseInt(parts[2]);
+
+                            response = groupDAO.joinGroup(groupId, userId)
+                                    ? "JOIN_GROUP_SUCCESS"
+                                    : "JOIN_GROUP_FAIL";
+                            break;
+                        }
+
+                        case "LEAVE_GROUP": {
+                            int userId = userDAO.getUserIdByEmail(parts[1]);
+                            int groupId = Integer.parseInt(parts[2]);
+
+                            response = groupDAO.leaveGroup(groupId, userId)
+                                    ? "LEAVE_GROUP_SUCCESS"
+                                    : "LEAVE_GROUP_FAIL";
+                            break;
+                        }
+
+                        case "GET_GROUPS": {
+                            int userId = userDAO.getUserIdByEmail(parts[1]);
+                            List<String> groups = groupDAO.getGroups(userId);
+                            response = "GROUP_LIST;" + String.join(";", groups);
+                            break;
+                        }
+
+                        case "SEND_GROUP": {
+                            // SEND_GROUP;email;groupId;content
+                            int userId = userDAO.getUserIdByEmail(parts[1]);
+                            int groupId = Integer.parseInt(parts[2]);
+                            String content = parts[3];
+
+                            boolean ok = messageDAO.saveGroupMessage(userId, groupId, content);
+
+                            response = ok ? "SEND_GROUP_SUCCESS" : "SEND_GROUP_FAIL";
+                            break;
+                        }
+                        case "GET_GROUP_MESSAGES": {
+                            
+                            int groupId = Integer.parseInt(parts[1]);
+
+                            
+                            List<String> messages = messageDAO.getMessagesByGroup(groupId);
+
+                            
+                            response = "GROUP_MESSAGES;" + String.join(";", messages);
+                            break;
+                        }
 
                         default:
                             response = "UNKNOWN_COMMAND";
@@ -142,7 +211,9 @@ public class ClientHandler implements Runnable {
             System.out.println("Client disconnected.");
         } finally {
             try {
-                if (socket != null) socket.close();
+                if (socket != null) {
+                    socket.close();
+                }
             } catch (IOException e) {
                 e.printStackTrace();
             }
