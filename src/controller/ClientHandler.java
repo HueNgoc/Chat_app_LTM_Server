@@ -22,8 +22,9 @@ public class ClientHandler implements Runnable {
     private Socket socket;
     private UserDao userDAO;
     private GroupDao groupDAO;
-    private BufferedReader in;
-    private PrintWriter out;
+    private DataInputStream dis;
+    private DataOutputStream dos;
+
     private MessageDao messageDAO;
 
     public ClientHandler(Socket socket) {
@@ -37,12 +38,12 @@ public class ClientHandler implements Runnable {
     public void run() {
         try {
             // Mở luồng nhập/xuất dữ liệu
-            in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-            out = new PrintWriter(socket.getOutputStream(), true);
+            dis = new DataInputStream(socket.getInputStream());
+            dos = new DataOutputStream(socket.getOutputStream());
 
-            String request;
             // Vòng lặp liên tục lắng nghe yêu cầu từ Client
-            while ((request = in.readLine()) != null) {
+            while (true) {
+                String request = dis.readUTF();
                 System.out.println("Client Request: " + request); // Ghi log ra màn hình server
 
                 // Cắt chuỗi theo dấu chấm phẩy ";"
@@ -140,16 +141,6 @@ public class ClientHandler implements Runnable {
                             break;
                         }
 
-                        case "JOIN_GROUP": {
-                            int userId = userDAO.getUserIdByEmail(parts[1]);
-                            int groupId = Integer.parseInt(parts[2]);
-
-                            response = groupDAO.joinGroup(groupId, userId)
-                                    ? "JOIN_GROUP_SUCCESS"
-                                    : "JOIN_GROUP_FAIL";
-                            break;
-                        }
-
                         case "LEAVE_GROUP": {
                             int userId = userDAO.getUserIdByEmail(parts[1]);
                             int groupId = Integer.parseInt(parts[2]);
@@ -209,6 +200,110 @@ public class ClientHandler implements Runnable {
                             break;
                         }
 
+                        case "GET_NOT_JOINED_GROUPS": {
+                            // GET_NOT_JOINED_GROUPS;email
+                            if (parts.length < 2) {
+                                response = "GROUP_LIST";
+                                break;
+                            }
+
+                            String email = parts[1];
+                            int userId = userDAO.getUserIdByEmail(email);
+
+                            List<String> groups = groupDAO.getNotJoinedGroups(userId);
+
+                            response = "GROUP_LIST";
+                            for (String g : groups) {
+                                response += ";" + g;
+                            }
+                            break;
+                        }
+
+// Join group
+                        case "JOIN_GROUP": {
+                            // JOIN_GROUP;email;groupId
+                            if (parts.length < 3) {
+                                response = "JOIN_GROUP_FAIL";
+                                break;
+                            }
+
+                            String email = parts[1];
+                            int groupId = Integer.parseInt(parts[2]);
+
+                            int userId = userDAO.getUserIdByEmail(email);
+
+                            boolean ok = groupDAO.joinGroup(groupId, userId);
+                            response = ok ? "JOIN_GROUP_SUCCESS" : "JOIN_GROUP_FAIL";
+                            break;
+                        }
+                        case "GET_NOT_FRIEND_USERS": {
+                            // GET_NOT_FRIEND_USERS;email
+                            if (parts.length < 2) {
+                                response = "USER_LIST";
+                                break;
+                            }
+
+                            String email = parts[1];
+                            int myId = userDAO.getUserIdByEmail(email);
+
+                            List<String> users = userDAO.getNotFriendUsers(myId);
+
+                            response = "USER_LIST";
+                            for (String u : users) {
+                                response += ";" + u; // id:email
+                            }
+                            break;
+                        }
+                        case "ADD_FRIEND": {
+                            // ADD_FRIEND;email;friendId
+                            if (parts.length < 3) {
+                                response = "ADD_FRIEND_FAIL";
+                                break;
+                            }
+
+                            String email = parts[1];
+                            int friendId = Integer.parseInt(parts[2]);
+
+                            int myId = userDAO.getUserIdByEmail(email);
+
+                            boolean ok = userDAO.addFriend(myId, friendId);
+                            response = ok ? "ADD_FRIEND_SUCCESS" : "ADD_FRIEND_FAIL";
+                            break;
+                        }
+
+                        case "GET_FRIEND_REQUESTS": {
+                            int userId = userDAO.getUserIdByEmail(parts[1]);
+
+                            List<String> reqs = userDAO.getFriendRequests(userId);
+
+                            response = "FRIEND_REQUESTS";
+                            for (String r : reqs) {
+                                response += ";" + r; // id:full_name
+                            }
+                            break;
+                        }
+
+                        case "ACCEPT_FRIEND": {
+                            // ACCEPT_FRIEND;myEmail;friendId
+                            int myId = userDAO.getUserIdByEmail(parts[1]);
+                            int friendId = Integer.parseInt(parts[2]);
+
+                            boolean ok = userDAO.acceptFriend(myId, friendId);
+                            response = ok ? "ACCEPT_SUCCESS" : "ACCEPT_FAIL";
+                            break;
+                        }
+
+                        case "REJECT_FRIEND": {
+                            // REJECT_FRIEND;myEmail;friendId
+                            int myId = userDAO.getUserIdByEmail(parts[1]);
+                            int friendId = Integer.parseInt(parts[2]);
+
+                            boolean ok = userDAO.rejectFriend(myId, friendId);
+                            response = ok ? "REJECT_SUCCESS" : "REJECT_FAIL";
+                            break;
+                        }
+
+                        
                         default:
                             response = "UNKNOWN_COMMAND";
                             break;
@@ -223,7 +318,11 @@ public class ClientHandler implements Runnable {
                 }
 
                 // Gửi phản hồi về Client
-                out.println(response);
+                if (!response.isEmpty()) {
+                    dos.writeUTF(response);
+                    dos.flush();
+                }
+
             }
 
         } catch (IOException e) {
@@ -238,4 +337,7 @@ public class ClientHandler implements Runnable {
             }
         }
     }
+
+ 
+
 }

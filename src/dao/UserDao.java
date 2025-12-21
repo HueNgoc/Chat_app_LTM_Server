@@ -7,6 +7,8 @@ package dao;
 import java.io.UnsupportedEncodingException;
 import model.User;
 import java.sql.*;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
 import utils.EmailService;
 import utils.PasswordUtils;
@@ -275,5 +277,115 @@ public class UserDao {
 
         return -1; // Không tìm thấy
     }
+
+    public List<String> getNotFriendUsers(int myId) {
+        List<String> list = new ArrayList<>();
+
+        String sql = """
+        SELECT u.id, uc.username
+        FROM users u
+        JOIN user_credentials uc ON u.id = uc.user_id
+        WHERE u.id != ?
+        AND u.id NOT IN (
+            SELECT friend_id FROM friends WHERE user_id = ?
+            UNION
+            SELECT user_id FROM friends WHERE friend_id = ?
+        )
+    """;
+
+        try (Connection conn = DatabaseConnection.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setInt(1, myId);
+            ps.setInt(2, myId);
+            ps.setInt(3, myId);
+
+            ResultSet rs = ps.executeQuery();
+            while (rs.next()) {
+                list.add(rs.getInt("id") + ":" + rs.getString("username"));
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        return list;
+    }
+
+    public boolean addFriend(int userId, int friendId) {
+        String sql = """
+        INSERT INTO friends(user_id, friend_id, status)
+        VALUES (?, ?, 'Pending')
+    """;
+
+        try (Connection conn = DatabaseConnection.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setInt(1, userId);
+            ps.setInt(2, friendId);
+            return ps.executeUpdate() > 0;
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return false;
+    }
+    
+    public List<String> getFriendRequests(int userId) {
+    List<String> list = new ArrayList<>();
+    String sql = """
+        SELECT u.id, u.full_name
+        FROM friends f
+        JOIN users u ON f.user_id = u.id
+        WHERE f.friend_id = ? AND f.status = 'Pending'
+    """;
+
+    try (Connection con = DatabaseConnection.getConnection();
+         PreparedStatement ps = con.prepareStatement(sql)) {
+
+        ps.setInt(1, userId);
+        ResultSet rs = ps.executeQuery();
+
+        while (rs.next()) {
+            list.add(rs.getInt("id") + ":" + rs.getString("full_name"));
+        }
+    } catch (Exception e) {
+        e.printStackTrace();
+    }
+    return list;
+}
+public boolean acceptFriend(int myId, int friendId) {
+    String sql = """
+        UPDATE friends
+        SET status = 'Accepted'
+        WHERE user_id = ? AND friend_id = ?
+    """;
+
+    try (Connection c = DatabaseConnection.getConnection();
+         PreparedStatement ps = c.prepareStatement(sql)) {
+
+        ps.setInt(1, friendId);
+        ps.setInt(2, myId);
+        return ps.executeUpdate() > 0;
+    } catch (Exception e) {
+        e.printStackTrace();
+    }
+    return false;
+}
+public boolean rejectFriend(int myId, int friendId) {
+    String sql = """
+        DELETE FROM friends
+        WHERE user_id = ? AND friend_id = ?
+    """;
+
+    try (Connection c = DatabaseConnection.getConnection();
+         PreparedStatement ps = c.prepareStatement(sql)) {
+
+        ps.setInt(1, friendId);
+        ps.setInt(2, myId);
+        return ps.executeUpdate() > 0;
+    } catch (Exception e) {
+        e.printStackTrace();
+    }
+    return false;
+}
+
 
 }
