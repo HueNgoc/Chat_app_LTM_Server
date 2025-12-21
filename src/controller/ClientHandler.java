@@ -167,25 +167,44 @@ public class ClientHandler implements Runnable {
                             break;
                         }
 
+//                        case "SEND_GROUP": {
+//                            // SEND_GROUP;email;groupId;content
+//                            int userId = userDAO.getUserIdByEmail(parts[1]);
+//                            int groupId = Integer.parseInt(parts[2]);
+//                            String content = parts[3];
+//
+//                            boolean ok = messageDAO.saveGroupMessage(userId, groupId, content);
+//
+//                            response = ok ? "SEND_GROUP_SUCCESS" : "SEND_GROUP_FAIL";
+//                            break;
+//                        }
                         case "SEND_GROUP": {
                             // SEND_GROUP;email;groupId;content
                             int userId = userDAO.getUserIdByEmail(parts[1]);
                             int groupId = Integer.parseInt(parts[2]);
-                            String content = parts[3];
+
+                            // Nối tất cả phần còn lại nếu người dùng gửi nhiều dấu ; trong content
+                            StringBuilder sb = new StringBuilder();
+                            for (int i = 3; i < parts.length; i++) {
+                                sb.append(parts[i]);
+                                if (i != parts.length - 1) {
+                                    sb.append(";");
+                                }
+                            }
+                            String content = sb.toString();
 
                             boolean ok = messageDAO.saveGroupMessage(userId, groupId, content);
 
                             response = ok ? "SEND_GROUP_SUCCESS" : "SEND_GROUP_FAIL";
                             break;
                         }
+
                         case "GET_GROUP_MESSAGES": {
-                            
+
                             int groupId = Integer.parseInt(parts[1]);
 
-                            
                             List<String> messages = messageDAO.getMessagesByGroup(groupId);
 
-                            
                             response = "GROUP_MESSAGES;" + String.join(";", messages);
                             break;
                         }
