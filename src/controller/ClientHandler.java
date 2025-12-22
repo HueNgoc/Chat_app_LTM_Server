@@ -48,6 +48,16 @@ public class ClientHandler implements Runnable {
                 String request = dis.readUTF();
                 System.out.println("Client Request: " + request); // Ghi log ra màn hình server
 
+                
+                // file  
+                if (request.startsWith("SEND_FILE_PRIVATE") ||
+    request.startsWith("SEND_FILE_GROUP")) {
+
+    handleSendFile(request);
+    continue; // QUAN TRỌNG: không cho rơi xuống switch
+}
+                
+             
                 // Cắt chuỗi theo dấu chấm phẩy ";"
                 // Ví dụ: "LOGIN;admin@gmail.com;123456" -> ["LOGIN", "admin@gmail.com", "123456"]
                 String[] parts = request.split(";");
@@ -490,6 +500,8 @@ public class ClientHandler implements Runnable {
 
         } catch (IOException e) {
             System.out.println("Client disconnected.");
+        } catch (Exception ex) {
+            System.getLogger(ClientHandler.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);
         } finally {
             try {
                 if (socket != null) {
@@ -509,5 +521,96 @@ public class ClientHandler implements Runnable {
             e.printStackTrace();
         }
     }
+    // file
+   private void handleSendFile(String header) throws Exception {
+
+    String[] p = header.split(";");
+    String type = p[0];
+    String email = p[1];
+    int targetId = Integer.parseInt(p[2]);
+    String fileName = p[3];
+    long fileSize = Long.parseLong(p[4]);
+
+    int senderId = userDAO.getUserIdByEmail(email);
+
+    File dir = new File("uploads");
+    if (!dir.exists()) dir.mkdir();
+
+    File file = new File(dir, System.currentTimeMillis() + "_" + fileName);
+    FileOutputStream fos = new FileOutputStream(file);
+
+    byte[] buffer = new byte[4096];
+    long remaining = fileSize;
+
+    while (remaining > 0) {
+    int read = dis.read(buffer, 0,
+        (int) Math.min(buffer.length, remaining));
+
+    if (read == -1) break;
+
+    fos.write(buffer, 0, read);
+    remaining -= read;
+}
+
+
+    fos.close();
+
+    // Lưu DB
+    if (type.equals("SEND_FILE_GROUP")) {
+        messageDAO.saveFileMessageGroup(senderId, targetId, fileName, file.getPath());
+    } else {
+        messageDAO.saveFileMessagePrivate(senderId, targetId, fileName, file.getPath());
+    }
+
+    dos.writeUTF("SEND_FILE_SUCCESS");
+    dos.flush();
+}
+
+   private void handleDownloadFile(String header) {
+    try {
+        // Cấu trúc: DOWNLOAD_FILE;filePath
+        String[] parts = header.split(";", 2);
+        if (parts.length < 2) {
+            dos.writeUTF("DOWNLOAD_FAIL;Missing File Path");
+            dos.flush();
+            return;
+        }
+
+        String filePath = parts[1];
+        File file = new File(filePath);
+
+        if (!file.exists() || !file.isFile()) {
+            dos.writeUTF("DOWNLOAD_FAIL;File Not Found");
+            dos.flush();
+            return;
+        }
+
+        // Gửi thông tin file cho client trước: kích thước file
+        dos.writeUTF("FILE_DATA;" + file.getName() + ";" + file.length());
+        dos.flush();
+
+        // Gửi file theo buffer 4KB
+        try (FileInputStream fis = new FileInputStream(file)) {
+            byte[] buffer = new byte[4096];
+            int read;
+            while ((read = fis.read(buffer)) != -1) {
+                dos.write(buffer, 0, read);
+            }
+        }
+
+        dos.flush();
+        System.out.println("File sent: " + file.getName());
+
+    } catch (IOException e) {
+        try {
+            dos.writeUTF("DOWNLOAD_FAIL;Server Error");
+            dos.flush();
+        } catch (IOException ex) {
+            ex.printStackTrace();
+        }
+        e.printStackTrace();
+    }
+}
+
 
 }

@@ -68,15 +68,24 @@ public class MessageDao {
     public List<String> getMessagesByGroup(int groupId) {
     List<String> list = new ArrayList<>();
 
-    String sql = """
-        SELECT m.id, uc.username, u.full_name,
-               m.content, m.msg_type
-        FROM messages m
-        JOIN users u ON m.sender_id = u.id
-        JOIN user_credentials uc ON uc.user_id = u.id
-        WHERE m.group_id = ?
-        ORDER BY m.created_at ASC
-    """;
+//    String sql = """
+//        SELECT m.id, uc.username, u.full_name,
+//               m.content, m.msg_type
+//        FROM messages m
+//        JOIN users u ON m.sender_id = u.id
+//        JOIN user_credentials uc ON uc.user_id = u.id
+//        WHERE m.group_id = ?
+//        ORDER BY m.created_at ASC
+//    """;
+String sql = """
+    SELECT m.id, uc.username, u.full_name,
+           m.content, m.msg_type, m.file_path
+    FROM messages m
+    JOIN users u ON m.sender_id = u.id
+    JOIN user_credentials uc ON uc.user_id = u.id
+    WHERE m.group_id = ?
+    ORDER BY m.created_at ASC
+""";
 
     try (Connection conn = DatabaseConnection.getConnection();
          PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -90,10 +99,16 @@ public class MessageDao {
             String fullName = rs.getString("full_name");
             String type = rs.getString("msg_type");
             String content = rs.getString("content");
-            
-
+            // file
+            String filePath = rs.getString("file_path");
+if (filePath == null) filePath = "";
             // format chuẩn để client parse
-            list.add(msgId + "|" + email + "|" + fullName + "|"+content) ;
+            //list.add(msgId + "|" + email + "|" + fullName + "|"+content) ;
+            // chỉnh 
+            // Text/Emoji
+list.add(msgId + "|" + email + "|" + fullName + "|" + type + "|" + content + "|" + filePath);
+
+
         }
     } catch (Exception e) {
         e.printStackTrace();
@@ -143,15 +158,17 @@ public class MessageDao {
 
 public List<String> getPrivateMessages(int userId1, int userId2) {
     List<String> list = new ArrayList<>();
-    String sql = """
-        SELECT m.id, uc.username, u.full_name, m.content, m.msg_type
-        FROM messages m
-        JOIN users u ON m.sender_id = u.id
-        JOIN user_credentials uc ON uc.user_id = u.id
-        WHERE (m.sender_id = ? AND m.receiver_id = ?)
-           OR (m.sender_id = ? AND m.receiver_id = ?)
-        ORDER BY m.created_at ASC
-    """;
+  String sql = """
+    SELECT m.id, uc.username, u.full_name,
+           m.msg_type, m.content, m.file_path
+    FROM messages m
+    JOIN users u ON m.sender_id = u.id
+    JOIN user_credentials uc ON uc.user_id = u.id
+    WHERE (m.sender_id = ? AND m.receiver_id = ?)
+       OR (m.sender_id = ? AND m.receiver_id = ?)
+    ORDER BY m.created_at ASC
+""";
+
 
     try (Connection conn = DatabaseConnection.getConnection();
          PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -162,14 +179,21 @@ public List<String> getPrivateMessages(int userId1, int userId2) {
         ps.setInt(4, userId1);
 
         ResultSet rs = ps.executeQuery();
-        while (rs.next()) {
-            int msgId = rs.getInt("id");
-            String email = rs.getString("username");
-            String fullName = rs.getString("full_name");
-            String content = rs.getString("content");
+       while (rs.next()) {
+    int msgId = rs.getInt("id");
+    String email = rs.getString("username");
+    String fullName = rs.getString("full_name");
+    String type = rs.getString("msg_type");
+    String content = rs.getString("content");
+    String filePath = rs.getString("file_path");
+    if (filePath == null) filePath = "";
 
-            list.add(msgId + "|" + email + "|" + fullName + "|" + content);
-        }
+    list.add(
+        msgId + "|" + email + "|" + fullName + "|" +
+        type + "|" + content + "|" + filePath
+    );
+}
+
     } catch (SQLException e) {
         e.printStackTrace();
     }
@@ -200,6 +224,54 @@ public boolean savePrivateMessage(int senderId, int receiverId, String content) 
     }
 }
 
+// file 
+public void saveFileMessagePrivate(
+        int senderId, int receiverId,
+        String fileName, String filePath) {
+
+    String sql = """
+        INSERT INTO messages
+        (sender_id, receiver_id, content, msg_type, file_path)
+        VALUES (?, ?, ?, 'File', ?)
+    """;
+
+    try (Connection c = DatabaseConnection.getConnection();
+         PreparedStatement ps = c.prepareStatement(sql)) {
+
+        ps.setInt(1, senderId);
+        ps.setInt(2, receiverId);
+        ps.setString(3, fileName);
+        ps.setString(4, filePath);
+        ps.executeUpdate();
+
+    } catch (Exception e) {
+        e.printStackTrace();
+    }
+}
+
+public void saveFileMessageGroup(
+        int senderId, int groupId,
+        String fileName, String filePath) {
+
+    String sql = """
+        INSERT INTO messages
+        (sender_id, group_id, content, msg_type, file_path)
+        VALUES (?, ?, ?, 'File', ?)
+    """;
+
+    try (Connection c = DatabaseConnection.getConnection();
+         PreparedStatement ps = c.prepareStatement(sql)) {
+
+        ps.setInt(1, senderId);
+        ps.setInt(2, groupId);
+        ps.setString(3, fileName);
+        ps.setString(4, filePath);
+        ps.executeUpdate();
+
+    } catch (Exception e) {
+        e.printStackTrace();
+    }
+}
 
 
 
