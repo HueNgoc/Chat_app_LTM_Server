@@ -10,6 +10,8 @@ import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.List;
 import java.util.ArrayList;
+import model.GroupInfo;
+import model.GroupMember;
 
 /**
  *
@@ -135,4 +137,74 @@ public class GroupDao {
         }
         return list;
     }
+    
+    // Lấy thông tin nhóm
+public GroupInfo getGroupInfo(int groupId) {
+    String sql = """
+        SELECT g.id, g.group_name, u.full_name AS creator_name,
+               COUNT(gm.user_id) AS member_count
+        FROM chat_groups g
+        JOIN users u ON g.created_by = u.id
+        LEFT JOIN group_members gm ON g.id = gm.group_id
+        WHERE g.id = ?
+        GROUP BY g.id, g.group_name, u.full_name
+    """;
+
+    try (Connection conn = DatabaseConnection.getConnection();
+         PreparedStatement ps = conn.prepareStatement(sql)) {
+
+        ps.setInt(1, groupId);
+        ResultSet rs = ps.executeQuery();
+
+        if (rs.next()) {
+            GroupInfo g = new GroupInfo();
+            g.setId(rs.getInt("id"));
+            g.setName(rs.getString("group_name"));
+            g.setCreatedBy(rs.getString("creator_name"));
+            g.setMemberCount(rs.getInt("member_count"));
+            return g;
+        }
+    } catch (Exception e) {
+        e.printStackTrace();
+    }
+    return null;
+}
+
+// Lấy danh sách thành viên trong nhóm
+public List<GroupMember> getGroupMembers(int groupId) {
+    List<GroupMember> list = new ArrayList<>();
+
+    String sql = """
+        SELECT u.id, u.full_name,
+               CASE 
+                   WHEN u.id = g.created_by THEN 'Admin'
+                   ELSE 'Member'
+               END AS role
+        FROM group_members gm
+        JOIN users u ON gm.user_id = u.id
+        JOIN chat_groups g ON gm.group_id = g.id
+        WHERE gm.group_id = ?
+    """;
+
+    try (Connection conn = DatabaseConnection.getConnection();
+         PreparedStatement ps = conn.prepareStatement(sql)) {
+
+        ps.setInt(1, groupId);
+        ResultSet rs = ps.executeQuery();
+
+        while (rs.next()) {
+            list.add(new GroupMember(
+                rs.getInt("id"),
+                rs.getString("full_name"),
+                rs.getString("role")
+            ));
+        }
+    } catch (Exception e) {
+        e.printStackTrace();
+    }
+    return list;
+}
+
+    
+    
 }

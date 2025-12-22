@@ -12,6 +12,8 @@ import java.io.*;
 import java.net.Socket;
 import java.sql.Date; // Thư viện để xử lý ngày tháng (yyyy-MM-dd)
 import java.util.List;
+import model.GroupInfo;
+import model.GroupMember;
 
 /**
  * Class này chịu trách nhiệm xử lý từng kết nối của Client gửi lên. Mỗi Client
@@ -104,6 +106,7 @@ public class ClientHandler implements Runnable {
                                             + user.getName() + ";"
                                             + user.getGender() + ";"
                                             + user.getDob().toString();
+                                    ClientManager.add(email, this);
 
                                 } else {
                                     response = "LOGIN_FAIL";
@@ -303,7 +306,167 @@ public class ClientHandler implements Runnable {
                             break;
                         }
 
-                        
+                        case "BLOCK_FRIEND": {
+                            if (parts.length < 3) {
+                                response = "BLOCK_FAIL";
+                                break;
+                            }
+                            int myId = userDAO.getUserIdByEmail(parts[1]);
+                            int targetId = Integer.parseInt(parts[2]);
+                            boolean ok = userDAO.blockUser(myId, targetId);
+                            response = ok ? "BLOCK_SUCCESS" : "BLOCK_FAIL";
+                            break;
+                        }
+
+                        case "GET_FRIENDS": {
+                            // Cấu trúc: GET_FRIENDS;email
+                            if (parts.length < 2) {
+                                response = "FRIEND_LIST";
+                                break;
+                            }
+
+                            String email = parts[1];
+                            int myId = userDAO.getUserIdByEmail(email);
+
+                            List<String> friends = userDAO.getFriends(myId);
+
+                            // Trả về dạng: FRIEND_LIST;id:name:email:avatar;id:name:email:avatar;...
+                            response = "FRIEND_LIST";
+                            for (String f : friends) {
+                                response += ";" + f;
+                            }
+                            break;
+                        }
+
+                        case "GET_PRIVATE_MESSAGES": {
+                            // Cấu trúc: GET_PRIVATE_MESSAGES;myEmail;friendId
+                            String myEmail = parts[1];
+                            int friendId = Integer.parseInt(parts[2]);
+
+                            int myId = userDAO.getUserIdByEmail(myEmail);
+
+                            List<String> messages = messageDAO.getPrivateMessages(myId, friendId);
+
+                            response = "PRIVATE_MESSAGES;" + String.join(";", messages);
+                            break;
+                        }
+
+                        case "SEND_PRIVATE": {
+                            // Cấu trúc: SEND_PRIVATE;senderEmail;receiverId;content
+                            if (parts.length < 4) {
+                                response = "SEND_PRIVATE_FAIL;Missing Data";
+                                break;
+                            }
+
+                            String senderEmail = parts[1];
+                            int receiverId = Integer.parseInt(parts[2]);
+
+                            // Nối tất cả phần còn lại nếu content có dấu ;
+                            StringBuilder sb = new StringBuilder();
+                            for (int i = 3; i < parts.length; i++) {
+                                sb.append(parts[i]);
+                                if (i != parts.length - 1) {
+                                    sb.append(";");
+                                }
+                            }
+                            String content = sb.toString();
+
+                            // Lấy senderId từ email
+                            int senderId = userDAO.getUserIdByEmail(senderEmail);
+
+                            // Lưu vào bảng messages
+                            boolean ok = messageDAO.savePrivateMessage(senderId, receiverId, content);
+
+                            response = ok ? "SEND_PRIVATE_SUCCESS" : "SEND_PRIVATE_FAIL";
+                            break;
+                        }
+
+                        case "REMOVE_FRIEND": {
+                            // REMOVE_FRIEND;myEmail;friendId
+                            if (parts.length < 3) {
+                                response = "REMOVE_FRIEND_FAIL";
+                                break;
+                            }
+
+                            String myEmail = parts[1];
+                            int myId = userDAO.getUserIdByEmail(myEmail);
+                            int friendId = Integer.parseInt(parts[2]);
+
+                            boolean ok = userDAO.removeFriend(myId, friendId);
+
+                            if (ok) {
+                                response = "REMOVE_FRIEND_SUCCESS";
+
+                                // ===== REAL-TIME PUSH =====
+                                // Lấy email + tên của người hủy
+                                String myName = UserDao.getFullNameByEmail(myEmail);
+
+                                // Lấy email của friend bị hủy
+                                String friendEmail = userDAO.getEmailByUserId(friendId);
+
+                                // Nếu friend đang online → gửi ngay
+                                ClientHandler friendHandler = ClientManager.get(friendEmail);
+                                if (friendHandler != null) {
+                                    friendHandler.send(
+                                            "FRIEND_REMOVED;" + myEmail + ";" + myName
+                                    );
+                                }
+                            } else {
+                                response = "REMOVE_FRIEND_FAIL";
+                            }
+                            break;
+                        }
+
+                        case "GET_USER_PROFILE": {
+                            // GET_USER_PROFILE;friendId
+                            if (parts.length < 2) {
+                                response = "USER_PROFILE_FAIL";
+                                break;
+                            }
+
+                            int friendId = Integer.parseInt(parts[1]);
+
+                            User u = userDAO.getUserById(friendId); // cần hàm này
+
+                            if (u != null) {
+                                response = "USER_PROFILE;"
+                                        + u.getName() + ";"
+                                        + u.getGender() + ";"
+                                        + u.getDob();
+                            } else {
+                                response = "USER_PROFILE_FAIL";
+                            }
+                            break;
+                        }
+
+                        case "GET_GROUP_INFO": {
+                            int groupId = Integer.parseInt(parts[1]);
+
+                            GroupInfo g = groupDAO.getGroupInfo(groupId);
+                            if (g == null) {
+                                response = "GROUP_INFO_FAIL";
+                                break;
+                            }
+
+                            List<GroupMember> members = groupDAO.getGroupMembers(groupId);
+
+                            StringBuilder sb = new StringBuilder();
+                            sb.append("GROUP_INFO;")
+                                    .append(g.getName()).append(";")
+                                    .append(g.getCreatedBy()).append(";")
+                                    .append(g.getMemberCount());
+
+                            for (GroupMember m : members) {
+                                sb.append(";")
+                                        .append(m.getId()).append(":")
+                                        .append(m.getName()).append(":")
+                                        .append(m.getRole());
+                            }
+
+                            response = sb.toString();
+                            break;
+                        }
+
                         default:
                             response = "UNKNOWN_COMMAND";
                             break;
@@ -338,6 +501,13 @@ public class ClientHandler implements Runnable {
         }
     }
 
- 
+    public synchronized void send(String msg) {
+        try {
+            dos.writeUTF(msg);
+            dos.flush();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
 
 }

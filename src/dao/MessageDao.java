@@ -141,6 +141,66 @@ public class MessageDao {
     return false;
 }
 
- 
+public List<String> getPrivateMessages(int userId1, int userId2) {
+    List<String> list = new ArrayList<>();
+    String sql = """
+        SELECT m.id, uc.username, u.full_name, m.content, m.msg_type
+        FROM messages m
+        JOIN users u ON m.sender_id = u.id
+        JOIN user_credentials uc ON uc.user_id = u.id
+        WHERE (m.sender_id = ? AND m.receiver_id = ?)
+           OR (m.sender_id = ? AND m.receiver_id = ?)
+        ORDER BY m.created_at ASC
+    """;
+
+    try (Connection conn = DatabaseConnection.getConnection();
+         PreparedStatement ps = conn.prepareStatement(sql)) {
+
+        ps.setInt(1, userId1);
+        ps.setInt(2, userId2);
+        ps.setInt(3, userId2);
+        ps.setInt(4, userId1);
+
+        ResultSet rs = ps.executeQuery();
+        while (rs.next()) {
+            int msgId = rs.getInt("id");
+            String email = rs.getString("username");
+            String fullName = rs.getString("full_name");
+            String content = rs.getString("content");
+
+            list.add(msgId + "|" + email + "|" + fullName + "|" + content);
+        }
+    } catch (SQLException e) {
+        e.printStackTrace();
+    }
+    return list;
+}
+
+public boolean savePrivateMessage(int senderId, int receiverId, String content) {
+    String sql = "INSERT INTO messages(sender_id, receiver_id, content, msg_type, created_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)";
+    try (Connection conn = DatabaseConnection.getConnection();
+         PreparedStatement pst = conn.prepareStatement(sql)) {
+
+        pst.setInt(1, senderId);
+        pst.setInt(2, receiverId);
+        pst.setString(3, content);
+
+        // Xác định loại message
+        if (containsEmoji(content)) {
+            pst.setString(4, "Emoji");
+        } else {
+            pst.setString(4, "Text");
+        }
+
+        int rows = pst.executeUpdate();
+        return rows > 0;
+    } catch (SQLException e) {
+        e.printStackTrace();
+        return false;
+    }
+}
+
+
+
 
 }

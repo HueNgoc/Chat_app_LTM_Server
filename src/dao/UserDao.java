@@ -327,64 +327,285 @@ public class UserDao {
         }
         return false;
     }
-    
+
     public List<String> getFriendRequests(int userId) {
-    List<String> list = new ArrayList<>();
-    String sql = """
+        List<String> list = new ArrayList<>();
+        String sql = """
         SELECT u.id, u.full_name
         FROM friends f
         JOIN users u ON f.user_id = u.id
         WHERE f.friend_id = ? AND f.status = 'Pending'
     """;
 
-    try (Connection con = DatabaseConnection.getConnection();
-         PreparedStatement ps = con.prepareStatement(sql)) {
+        try (Connection con = DatabaseConnection.getConnection(); PreparedStatement ps = con.prepareStatement(sql)) {
 
-        ps.setInt(1, userId);
-        ResultSet rs = ps.executeQuery();
+            ps.setInt(1, userId);
+            ResultSet rs = ps.executeQuery();
 
-        while (rs.next()) {
-            list.add(rs.getInt("id") + ":" + rs.getString("full_name"));
+            while (rs.next()) {
+                list.add(rs.getInt("id") + ":" + rs.getString("full_name"));
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
         }
-    } catch (Exception e) {
-        e.printStackTrace();
+        return list;
     }
-    return list;
-}
-public boolean acceptFriend(int myId, int friendId) {
-    String sql = """
-        UPDATE friends
-        SET status = 'Accepted'
-        WHERE user_id = ? AND friend_id = ?
-    """;
 
-    try (Connection c = DatabaseConnection.getConnection();
-         PreparedStatement ps = c.prepareStatement(sql)) {
+   public boolean acceptFriend(int myId, int friendId) {
+    String sqlUpdate = "UPDATE friends SET status='Accepted' WHERE user_id=? AND friend_id=?";
+    String sqlInsertMirror = "INSERT INTO friends(user_id, friend_id, status) VALUES(?, ?, 'Accepted') " +
+                             "ON DUPLICATE KEY UPDATE status='Accepted'";
+    Connection conn = null;
+    PreparedStatement psUpdate = null;
+    PreparedStatement psInsert = null;
 
-        ps.setInt(1, friendId);
-        ps.setInt(2, myId);
-        return ps.executeUpdate() > 0;
-    } catch (Exception e) {
+    try {
+        conn = DatabaseConnection.getConnection();
+        conn.setAutoCommit(false);
+
+        // Update lời mời
+        psUpdate = conn.prepareStatement(sqlUpdate);
+        psUpdate.setInt(1, friendId);
+        psUpdate.setInt(2, myId);
+        int updated = psUpdate.executeUpdate();
+
+        if (updated > 0) {
+            // Thêm bản ghi mirror
+            psInsert = conn.prepareStatement(sqlInsertMirror);
+            psInsert.setInt(1, myId);
+            psInsert.setInt(2, friendId);
+            psInsert.executeUpdate();
+
+            conn.commit();
+            return true;
+        } else {
+            conn.rollback();
+        }
+
+    } catch (SQLException e) {
         e.printStackTrace();
+        try { if (conn != null) conn.rollback(); } catch (SQLException ex) { ex.printStackTrace(); }
+    } finally {
+        try { if (psUpdate != null) psUpdate.close(); } catch (SQLException e) { e.printStackTrace(); }
+        try { if (psInsert != null) psInsert.close(); } catch (SQLException e) { e.printStackTrace(); }
+        try { if (conn != null) conn.close(); } catch (SQLException e) { e.printStackTrace(); }
     }
     return false;
 }
-public boolean rejectFriend(int myId, int friendId) {
-    String sql = """
+
+
+    public boolean rejectFriend(int myId, int friendId) {
+        String sql = """
         DELETE FROM friends
         WHERE user_id = ? AND friend_id = ?
     """;
 
-    try (Connection c = DatabaseConnection.getConnection();
-         PreparedStatement ps = c.prepareStatement(sql)) {
+        try (Connection c = DatabaseConnection.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
 
-        ps.setInt(1, friendId);
-        ps.setInt(2, myId);
-        return ps.executeUpdate() > 0;
-    } catch (Exception e) {
+            ps.setInt(1, friendId);
+            ps.setInt(2, myId);
+            return ps.executeUpdate() > 0;
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return false;
+    }
+
+    public List<String> getFriends(int myUserId) {
+    List<String> friends = new ArrayList<>();
+    String sql = """
+        SELECT DISTINCT u.id, u.full_name, uc.username, u.avatar_url
+        FROM friends f
+        JOIN users u ON (u.id = f.friend_id AND f.user_id = ?)
+        JOIN user_credentials uc ON uc.user_id = u.id
+        WHERE f.status='Accepted'
+        UNION
+        SELECT DISTINCT u.id, u.full_name, uc.username, u.avatar_url
+        FROM friends f
+        JOIN users u ON (u.id = f.user_id AND f.friend_id = ?)
+        JOIN user_credentials uc ON uc.user_id = u.id
+        WHERE f.status='Accepted'
+    """;
+
+    try (Connection conn = DatabaseConnection.getConnection();
+         PreparedStatement ps = conn.prepareStatement(sql)) {
+
+        ps.setInt(1, myUserId);
+        ps.setInt(2, myUserId);
+
+        ResultSet rs = ps.executeQuery();
+        while (rs.next()) {
+            int id = rs.getInt("id");
+            String name = rs.getString("full_name");
+            String email = rs.getString("username");
+            String avatar = rs.getString("avatar_url") != null ? rs.getString("avatar_url") : "";
+
+            friends.add(id + ":" + name + ":" + email + ":" + avatar);
+        }
+
+    } catch (SQLException e) {
+        e.printStackTrace();
+    }
+    return friends;
+}
+
+
+    public boolean removeFriend(int myId, int friendId) {
+        String sql = "DELETE FROM friends WHERE (user_id=? AND friend_id=?) OR (user_id=? AND friend_id=?)";
+        try (Connection conn =DatabaseConnection.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, myId);
+            ps.setInt(2, friendId);
+            ps.setInt(3, friendId);
+            ps.setInt(4, myId);
+            int rows = ps.executeUpdate();
+            return rows > 0;
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+    
+    // Block một user
+public boolean blockUser(int myId, int targetId) {
+    String deleteFriendSql = "DELETE FROM friends WHERE (user_id=? AND friend_id=?) OR (user_id=? AND friend_id=?)";
+    String insertBlockSql = "INSERT INTO blocks(blocker_id, blocked_id) VALUES (?, ?)";
+
+    Connection conn = null;
+    PreparedStatement psDelete = null;
+    PreparedStatement psInsert = null;
+
+    try {
+        conn = DatabaseConnection.getConnection();
+        conn.setAutoCommit(false); // Bắt đầu transaction
+
+        // 1. Xóa khỏi friends nếu đang là friend
+        psDelete = conn.prepareStatement(deleteFriendSql);
+        psDelete.setInt(1, myId);
+        psDelete.setInt(2, targetId);
+        psDelete.setInt(3, targetId);
+        psDelete.setInt(4, myId);
+        psDelete.executeUpdate();
+
+        // 2. Thêm vào bảng blocks
+        psInsert = conn.prepareStatement(insertBlockSql);
+        psInsert.setInt(1, myId);
+        psInsert.setInt(2, targetId);
+        psInsert.executeUpdate();
+
+        conn.commit(); // commit transaction
+        return true;
+
+    } catch (SQLException e) {
+        e.printStackTrace();
+        try {
+            if (conn != null) conn.rollback(); // rollback nếu lỗi
+        } catch (SQLException ex) {
+            ex.printStackTrace();
+        }
+        return false;
+
+    } finally {
+        try { if (psDelete != null) psDelete.close(); } catch (SQLException e) { e.printStackTrace(); }
+        try { if (psInsert != null) psInsert.close(); } catch (SQLException e) { e.printStackTrace(); }
+        try { if (conn != null) conn.close(); } catch (SQLException e) { e.printStackTrace(); }
+    }
+}
+
+// Kiểm tra xem user có bị block không
+public boolean isBlocked(int myId, int targetId) {
+    String sql = "SELECT * FROM blocks WHERE blocker_id=? AND blocked_id=?";
+    try (Connection conn = DatabaseConnection.getConnection();
+         PreparedStatement ps = conn.prepareStatement(sql)) {
+
+        ps.setInt(1, myId);
+        ps.setInt(2, targetId);
+        ResultSet rs = ps.executeQuery();
+        return rs.next();
+
+    } catch (SQLException e) {
         e.printStackTrace();
     }
     return false;
+}
+
+// Lấy danh sách user mà tôi đã block
+public List<String> getBlockedUsers(int myId) {
+    List<String> list = new ArrayList<>();
+    String sql = "SELECT u.id, u.full_name, uc.username FROM blocks b " +
+                 "JOIN users u ON b.blocked_id = u.id " +
+                 "JOIN user_credentials uc ON uc.user_id = u.id " +
+                 "WHERE b.blocker_id=?";
+    try (Connection conn = DatabaseConnection.getConnection();
+         PreparedStatement ps = conn.prepareStatement(sql)) {
+
+        ps.setInt(1, myId);
+        ResultSet rs = ps.executeQuery();
+        while (rs.next()) {
+            list.add(rs.getInt("id") + ":" + rs.getString("full_name") + ":" + rs.getString("username"));
+        }
+
+    } catch (SQLException e) {
+        e.printStackTrace();
+    }
+    return list;
+}
+
+// Unblock user
+public boolean unblockUser(int myId, int targetId) {
+    String sql = "DELETE FROM blocks WHERE blocker_id=? AND blocked_id=?";
+    try (Connection conn = DatabaseConnection.getConnection();
+         PreparedStatement ps = conn.prepareStatement(sql)) {
+
+        ps.setInt(1, myId);
+        ps.setInt(2, targetId);
+        return ps.executeUpdate() > 0;
+
+    } catch (SQLException e) {
+        e.printStackTrace();
+    }
+    return false;
+}
+
+public String getEmailByUserId(int userId) {
+    String sql = """
+        SELECT uc.username
+        FROM user_credentials uc
+        WHERE uc.user_id = ?
+    """;
+
+    try (Connection conn = DatabaseConnection.getConnection();
+         PreparedStatement ps = conn.prepareStatement(sql)) {
+
+        ps.setInt(1, userId);
+        ResultSet rs = ps.executeQuery();
+        if (rs.next()) {
+            return rs.getString("username");
+        }
+    } catch (Exception e) {
+        e.printStackTrace();
+    }
+    return null;
+}
+
+public User getUserById(int id) {
+    String sql = "SELECT full_name, gender, dob FROM users WHERE id = ?";
+    try (Connection c = DatabaseConnection.getConnection();
+         PreparedStatement ps = c.prepareStatement(sql)) {
+
+        ps.setInt(1, id);
+        ResultSet rs = ps.executeQuery();
+
+        if (rs.next()) {
+            User u = new User();
+            u.setName(rs.getString("full_name"));
+            u.setGender(rs.getString("gender"));
+            u.setDob(rs.getDate("dob"));
+            return u;
+        }
+    } catch (Exception e) {
+        e.printStackTrace();
+    }
+    return null;
 }
 
 
