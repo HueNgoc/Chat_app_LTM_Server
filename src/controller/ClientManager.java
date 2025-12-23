@@ -29,4 +29,26 @@ public class ClientManager {
     public static ClientHandler get(String email) {
         return onlineUsers.get(email);
     }
+    //////////////////////////
+    // email -> ClientHandler
+    private static ConcurrentHashMap<String, ClientHandler> clients = new ConcurrentHashMap<>();
+
+    // userId -> IP
+    private static ConcurrentHashMap<Integer, String> userIPs = new ConcurrentHashMap<>();
+
+    public static void add(String email, int userId, String ip, ClientHandler handler) {
+        clients.put(email, handler);
+        userIPs.put(userId, ip);
+    }
+
+    public static void remove(String email, int userId) {
+        clients.remove(email);
+        userIPs.remove(userId);
+    }
+
+    public static String getIP(int userId) {
+        return userIPs.get(userId);
+    }
+
+ 
 }

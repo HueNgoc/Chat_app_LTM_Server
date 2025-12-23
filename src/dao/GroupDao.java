@@ -205,6 +205,37 @@ public List<GroupMember> getGroupMembers(int groupId) {
     return list;
 }
 
-    
+public boolean isAdmin(int groupId, int userId) {
+    String sql = "SELECT 1 FROM chat_groups WHERE id=? AND created_by=?";
+    try (Connection conn = DatabaseConnection.getConnection();
+         PreparedStatement ps = conn.prepareStatement(sql)) {
+
+        ps.setInt(1, groupId);
+        ps.setInt(2, userId);
+        return ps.executeQuery().next();
+
+    } catch (Exception e) {
+        e.printStackTrace();
+    }
+    return false;
+}
+
+    // Xóa thành viên khỏi nhóm (Admin dùng)
+public boolean removeMember(int groupId, int userId) {
+    String sql = "DELETE FROM group_members WHERE group_id=? AND user_id=?";
+    try (Connection conn = DatabaseConnection.getConnection();
+         PreparedStatement ps = conn.prepareStatement(sql)) {
+
+        ps.setInt(1, groupId);
+        ps.setInt(2, userId);
+
+        return ps.executeUpdate() > 0;
+
+    } catch (Exception e) {
+        e.printStackTrace();
+    }
+    return false;
+}
+
     
 }

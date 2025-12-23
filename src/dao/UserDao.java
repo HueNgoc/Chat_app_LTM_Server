@@ -279,36 +279,49 @@ public class UserDao {
     }
 
     public List<String> getNotFriendUsers(int myId) {
-        List<String> list = new ArrayList<>();
+    List<String> list = new ArrayList<>();
 
-        String sql = """
+    String sql = """
         SELECT u.id, uc.username
         FROM users u
         JOIN user_credentials uc ON u.id = uc.user_id
         WHERE u.id != ?
         AND u.id NOT IN (
+            -- đã là bạn (2 chiều)
             SELECT friend_id FROM friends WHERE user_id = ?
             UNION
             SELECT user_id FROM friends WHERE friend_id = ?
         )
+        AND u.id NOT IN (
+            -- mình đã block người khác
+            SELECT blocked_id FROM blocks WHERE blocker_id = ?
+        )
+        AND u.id NOT IN (
+            -- người khác đã block mình
+            SELECT blocker_id FROM blocks WHERE blocked_id = ?
+        )
     """;
 
-        try (Connection conn = DatabaseConnection.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+    try (Connection conn = DatabaseConnection.getConnection();
+         PreparedStatement ps = conn.prepareStatement(sql)) {
 
-            ps.setInt(1, myId);
-            ps.setInt(2, myId);
-            ps.setInt(3, myId);
+        ps.setInt(1, myId);
+        ps.setInt(2, myId);
+        ps.setInt(3, myId);
+        ps.setInt(4, myId);
+        ps.setInt(5, myId);
 
-            ResultSet rs = ps.executeQuery();
-            while (rs.next()) {
-                list.add(rs.getInt("id") + ":" + rs.getString("username"));
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
+        ResultSet rs = ps.executeQuery();
+        while (rs.next()) {
+            list.add(rs.getInt("id") + ":" + rs.getString("username"));
         }
-
-        return list;
+    } catch (Exception e) {
+        e.printStackTrace();
     }
+
+    return list;
+}
+
 
     public boolean addFriend(int userId, int friendId) {
         String sql = """
@@ -465,51 +478,83 @@ public class UserDao {
         }
     }
     
-    // Block một user
-public boolean blockUser(int myId, int targetId) {
-    String deleteFriendSql = "DELETE FROM friends WHERE (user_id=? AND friend_id=?) OR (user_id=? AND friend_id=?)";
-    String insertBlockSql = "INSERT INTO blocks(blocker_id, blocked_id) VALUES (?, ?)";
+//    // Block một user
+//public boolean blockUser(int myId, int targetId) {
+//    String deleteFriendSql = "DELETE FROM friends WHERE (user_id=? AND friend_id=?) OR (user_id=? AND friend_id=?)";
+//    String insertBlockSql = "INSERT INTO blocks(blocker_id, blocked_id) VALUES (?, ?)";
+//
+//    Connection conn = null;
+//    PreparedStatement psDelete = null;
+//    PreparedStatement psInsert = null;
+//
+//    try {
+//        conn = DatabaseConnection.getConnection();
+//        conn.setAutoCommit(false); // Bắt đầu transaction
+//
+//        // 1. Xóa khỏi friends nếu đang là friend
+//        psDelete = conn.prepareStatement(deleteFriendSql);
+//        psDelete.setInt(1, myId);
+//        psDelete.setInt(2, targetId);
+//        psDelete.setInt(3, targetId);
+//        psDelete.setInt(4, myId);
+//        psDelete.executeUpdate();
+//
+//        // 2. Thêm vào bảng blocks
+//        psInsert = conn.prepareStatement(insertBlockSql);
+//        psInsert.setInt(1, myId);
+//        psInsert.setInt(2, targetId);
+//        psInsert.executeUpdate();
+//
+//        conn.commit(); // commit transaction
+//        return true;
+//
+//    } catch (SQLException e) {
+//        e.printStackTrace();
+//        try {
+//            if (conn != null) conn.rollback(); // rollback nếu lỗi
+//        } catch (SQLException ex) {
+//            ex.printStackTrace();
+//        }
+//        return false;
+//
+//    } finally {
+//        try { if (psDelete != null) psDelete.close(); } catch (SQLException e) { e.printStackTrace(); }
+//        try { if (psInsert != null) psInsert.close(); } catch (SQLException e) { e.printStackTrace(); }
+//        try { if (conn != null) conn.close(); } catch (SQLException e) { e.printStackTrace(); }
+//    }
+//}
+    
+    public boolean blockUser(int myId, int targetId) {
+    String deleteFriendSql =
+        "DELETE FROM friends WHERE (user_id=? AND friend_id=?) OR (user_id=? AND friend_id=?)";
+    String insertBlockSql =
+        "INSERT IGNORE INTO blocks(blocker_id, blocked_id) VALUES (?, ?)";
 
-    Connection conn = null;
-    PreparedStatement psDelete = null;
-    PreparedStatement psInsert = null;
+    try (Connection conn = DatabaseConnection.getConnection()) {
+        conn.setAutoCommit(false);
 
-    try {
-        conn = DatabaseConnection.getConnection();
-        conn.setAutoCommit(false); // Bắt đầu transaction
+        try (PreparedStatement psDelete = conn.prepareStatement(deleteFriendSql);
+             PreparedStatement psInsert = conn.prepareStatement(insertBlockSql)) {
 
-        // 1. Xóa khỏi friends nếu đang là friend
-        psDelete = conn.prepareStatement(deleteFriendSql);
-        psDelete.setInt(1, myId);
-        psDelete.setInt(2, targetId);
-        psDelete.setInt(3, targetId);
-        psDelete.setInt(4, myId);
-        psDelete.executeUpdate();
+            psDelete.setInt(1, myId);
+            psDelete.setInt(2, targetId);
+            psDelete.setInt(3, targetId);
+            psDelete.setInt(4, myId);
+            psDelete.executeUpdate();
 
-        // 2. Thêm vào bảng blocks
-        psInsert = conn.prepareStatement(insertBlockSql);
-        psInsert.setInt(1, myId);
-        psInsert.setInt(2, targetId);
-        psInsert.executeUpdate();
+            psInsert.setInt(1, myId);
+            psInsert.setInt(2, targetId);
+            psInsert.executeUpdate();
 
-        conn.commit(); // commit transaction
-        return true;
-
+            conn.commit();
+            return true;
+        }
     } catch (SQLException e) {
         e.printStackTrace();
-        try {
-            if (conn != null) conn.rollback(); // rollback nếu lỗi
-        } catch (SQLException ex) {
-            ex.printStackTrace();
-        }
-        return false;
-
-    } finally {
-        try { if (psDelete != null) psDelete.close(); } catch (SQLException e) { e.printStackTrace(); }
-        try { if (psInsert != null) psInsert.close(); } catch (SQLException e) { e.printStackTrace(); }
-        try { if (conn != null) conn.close(); } catch (SQLException e) { e.printStackTrace(); }
     }
+    return false;
 }
+
 
 // Kiểm tra xem user có bị block không
 public boolean isBlocked(int myId, int targetId) {
@@ -541,7 +586,9 @@ public List<String> getBlockedUsers(int myId) {
         ps.setInt(1, myId);
         ResultSet rs = ps.executeQuery();
         while (rs.next()) {
-            list.add(rs.getInt("id") + ":" + rs.getString("full_name") + ":" + rs.getString("username"));
+//            list.add(rs.getInt("id") + ":" + rs.getString("full_name") + ":" + rs.getString("username"));
+list.add(rs.getInt("id") + ":" + rs.getString("full_name"));
+
         }
 
     } catch (SQLException e) {
